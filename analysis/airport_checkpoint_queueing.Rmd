@@ -1,0 +1,309 @@
+---
+title: "Planning an Airport Screening Queue with Erlang C"
+subtitle: "A reproducible M/M/c case study using synthetic event timestamps"
+author: "Reway Du"
+date: "Portfolio edition — August 2026"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+    theme: flatly
+    self_contained: true
+    pandoc_args: ["--resource-path=.."]
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  out.width = "95%"
+)
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(knitr)
+  library(readr)
+  library(tidyr)
+})
+
+source(file.path("R", "queueing_functions.R"))
+
+period_order <- c("Morning peak", "Midday", "Afternoon peak", "Evening")
+estimates <- read_csv("results/period_estimates.csv", show_col_types = FALSE) %>%
+  mutate(period = factor(period, levels = period_order))
+validation <- read_csv("results/holdout_validation.csv", show_col_types = FALSE) %>%
+  mutate(period = factor(period, levels = period_order))
+staffing <- read_csv("results/staffing_recommendations.csv", show_col_types = FALSE) %>%
+  mutate(period = factor(period, levels = period_order))
+metadata <- read_csv("results/analysis_metadata.csv", show_col_types = FALSE)
+metadata_values <- setNames(metadata$value, metadata$item)
+events <- read_csv("data/synthetic_checkpoint_events.csv", show_col_types = FALSE)
+
+fmt_number <- function(x, digits = 1) format(round(x, digits), nsmall = digits, big.mark = ",")
+fmt_percent <- function(x, digits = 1) paste0(fmt_number(100 * x, digits), "%")
+fmt_pp <- function(x, digits = 1) paste0(fmt_number(x, digits), " pp")
+
+morning <- validation %>% filter(period == "Morning peak")
+afternoon <- validation %>% filter(period == "Afternoon peak")
+mean_absolute_error <- mean(validation$absolute_service_level_error_pp)
+max_absolute_error <- max(validation$absolute_service_level_error_pp)
+all_holdout_in_interval <- all(
+  validation$observed_service_level >= validation$service_level_low &
+    validation$observed_service_level <= validation$service_level_high
+)
+```
+
+# Executive summary
+
+This portfolio project asks a practical planning question: **given independently
+observed passenger arrivals, service durations, and the number of parallel
+screening servers, which operating periods are likely to miss a target of 85%
+of passengers waiting no more than 10 minutes?**
+
+The analysis estimates arrival rates ($\lambda$) from arrival counts and scheduled
+exposure, and service rates ($\mu$) from the elapsed time between separate service
+start and service end timestamps. Waiting time is reserved for validation; it is
+**not** used to back-solve processing capacity.
+
+The fitted model flags the morning and afternoon peaks. Their predicted
+10-minute service levels are `r fmt_percent(morning$model_service_level)` and
+`r fmt_percent(afternoon$model_service_level)`, respectively, compared with the
+85% goal. On the later chronological holdout, the observed values are
+`r fmt_percent(morning$observed_service_level)` and
+`r fmt_percent(afternoon$observed_service_level)`. The mean absolute validation
+error across all four periods is `r fmt_pp(mean_absolute_error)`; all four
+holdout estimates `r if (all_holdout_in_interval) "fall" else "do not all fall"`
+inside the training parameter-bootstrap bands. Those bands describe uncertainty
+from resampling training dates; they are not formal holdout predictive intervals.
+
+> **Scope warning.** All people, timestamps, and operating conditions are
+> synthetic. The results demonstrate an analytical workflow; they are not
+> evidence about a real airport and must not be used as staffing advice.
+
+# Data design and temporal split
+
+The included generator creates a fictional first-come, first-served screening
+system with four two-hour operating windows per day. Passenger arrivals follow a
+Poisson process, service durations are exponential, and each operating window
+has a fixed number of identical parallel servers. Two hours of warm-up events
+are simulated but excluded before the measured window begins.
+
+The released event table contains only synthetic identifiers and operational
+timestamps:
+
+- `arrival_time`: when a passenger joins the queue;
+- `service_start_time`: when screening begins;
+- `service_end_time`: when screening ends;
+- `server_id` and `servers_scheduled`: synthetic resource identifiers and staffing;
+- `service_date` and `period`: the operating window.
+
+There are `r format(nrow(events), big.mark = ",")` measured passenger events.
+The first `r metadata_values[["training_days"]]` dates
+(`r metadata_values[["training_start"]]` through
+`r metadata_values[["training_end"]]`) estimate the model. The final
+`r metadata_values[["holdout_days"]]` dates
+(`r metadata_values[["holdout_start"]]` through
+`r metadata_values[["holdout_end"]]`) are untouched until validation. This
+chronological split prevents future waiting outcomes from influencing parameter
+estimation.
+
+# Queueing model
+
+For each operating period, the maximum-likelihood rate estimates are
+
+$$
+\widehat{\lambda} = \frac{\text{passenger arrivals}}{\text{scheduled exposure hours}},
+\qquad
+\widehat{\mu} = \frac{\text{completed services}}{\text{total service hours}}.
+$$
+
+Here, $\mu$ is the service rate of **one** parallel server, and $c$ is the number
+of scheduled servers. Traffic intensity is
+
+$$
+\rho = \frac{\lambda}{c\mu}.
+$$
+
+A steady-state distribution exists only when $\rho < 1$. For a stable M/M/$c$
+queue, the Erlang-C probability that a passenger must wait is
+
+$$
+C(\lambda,\mu,c)=
+\frac{\frac{a^c}{c!(1-\rho)}}
+{\sum_{k=0}^{c-1}\frac{a^k}{k!}+\frac{a^c}{c!(1-\rho)}},
+\qquad a=\frac{\lambda}{\mu}.
+$$
+
+The predicted probability of waiting no more than $t$ hours is
+
+$$
+P(W_q \le t)=1-C(\lambda,\mu,c)e^{-(c\mu-\lambda)t},
+$$
+
+and the expected queue wait is
+
+$$
+E(W_q)=\frac{C(\lambda,\mu,c)}{c\mu-\lambda}.
+$$
+
+The implementation evaluates Erlang C on the log scale for numerical stability
+and returns no finite steady-state service level when $\rho \ge 1$.
+
+# Estimated operating conditions
+
+```{r estimates-table}
+estimates %>%
+  transmute(
+    Period = as.character(period),
+    `Training passengers` = training_passengers,
+    `Arrivals / hour` = round(lambda_hat, 1),
+    `Services / server-hour` = round(mu_hat, 1),
+    Servers = servers,
+    Utilization = fmt_percent(utilization),
+    `Predicted within 10 min` = fmt_percent(model_service_level),
+    `Expected wait (min)` = round(model_mean_wait_minutes, 1)
+  ) %>%
+  kable(
+    align = c("l", "r", "r", "r", "r", "r", "r", "r"),
+    caption = "Training-period M/M/c estimates."
+  )
+```
+
+Morning demand consumes about `r fmt_percent(estimates$utilization[estimates$period == "Morning peak"])`
+of estimated capacity. This is the most fragile period: a small demand increase
+or service slowdown sharply increases waits. Afternoon peak is also below the
+service-level goal, while midday and evening retain more spare capacity.
+
+# Uncertainty and sensitivity
+
+The reported 95% intervals come from 500 nonparametric bootstrap samples of
+whole training dates within each operating period. Resampling dates, rather than
+individual passengers, keeps each day's arrivals and service durations together.
+This quantifies finite-sample uncertainty in both rate estimates. It does not
+cover structural errors such as non-Poisson arrivals or time-varying service
+rates.
+
+```{r sensitivity-figure, echo=FALSE}
+knitr::include_graphics("figures/sensitivity_heatmap.png")
+```
+
+The sensitivity grid changes demand from 90% to 120% of the training estimate
+and service speed from 90% to 110%. Blank-grey/"Unstable" cells have
+$\rho \ge 1$, so a steady-state waiting-time probability does not exist. The
+peak periods deteriorate fastest because they have the smallest capacity buffer.
+
+# Chronological holdout validation
+
+Waiting timestamps are used only here, after model fitting. The empirical
+service level is the proportion of holdout passengers whose elapsed time from
+arrival to service start is no more than 10 minutes.
+
+```{r validation-figure, echo=FALSE}
+knitr::include_graphics("figures/holdout_validation.png")
+```
+
+```{r validation-table}
+validation %>%
+  transmute(
+    Period = as.character(period),
+    `Holdout passengers` = holdout_passengers,
+    `Model service level` = fmt_percent(model_service_level),
+    `Holdout service level` = fmt_percent(observed_service_level),
+    `Error (percentage points)` = round(service_level_error_pp, 1),
+    `Model mean wait` = round(model_mean_wait_minutes, 1),
+    `Holdout mean wait` = round(observed_mean_wait_minutes, 1)
+  ) %>%
+  kable(
+    align = c("l", "r", "r", "r", "r", "r", "r"),
+    caption = "Out-of-time validation on the final 28 dates."
+  )
+```
+
+Peak-period point errors reach `r fmt_pp(max_absolute_error)`, which is an
+important caution against treating one steady-state estimate as a promise.
+Nevertheless, the model identifies the same two weak periods in training and
+holdout. Each holdout service level is inside its corresponding training
+parameter-bootstrap band, but that comparison is descriptive rather than a
+coverage guarantee.
+
+```{r holdout-ecdf, echo=FALSE}
+knitr::include_graphics("figures/holdout_wait_ecdf.png")
+```
+
+# Staffing scenarios
+
+For each period, the analysis searches for the smallest integer $c$ that is
+stable and reaches the 85%/10-minute target. The stress case combines 15% more
+demand with service that is 5% slower. These are scenario calculations, not
+causal estimates of what one extra staff member would accomplish in practice.
+
+```{r staffing-figure, echo=FALSE}
+knitr::include_graphics("figures/staffing_scenarios.png")
+```
+
+```{r staffing-table}
+staffing %>%
+  transmute(
+    Period = as.character(period),
+    `Current servers` = current_servers,
+    `Minimum at baseline` = minimum_servers_baseline,
+    `Minimum under stress` = minimum_servers_stress,
+    `Stress gap vs current` = stress_gap
+  ) %>%
+  kable(
+    align = c("l", "r", "r", "r", "r"),
+    caption = "Server counts required by the fitted M/M/c scenarios."
+  )
+```
+
+The model suggests that both peak periods require additional capacity at the
+baseline target, and a two-server buffer under the stated stress scenario.
+Midday and evening have more baseline capacity than the model requires, but the
+stress calculation uses that buffer.
+
+# Assumptions and limitations
+
+The M/M/$c$ interpretation depends on the following assumptions:
+
+1. arrivals are approximately Poisson within each modeled period;
+2. service durations are approximately independent and exponential;
+3. servers are parallel, identical, continuously available, and follow a
+   first-come, first-served discipline;
+4. arrival and service rates are constant within a period;
+5. the queue has reached a steady operating regime; and
+6. customers do not abandon, switch queues, or receive priority service.
+
+The synthetic generator intentionally follows these assumptions, so the holdout
+exercise validates the implementation under controlled conditions—not the
+external validity of Erlang C at a real checkpoint. Real operations would need
+diagnostic tests, staffing breaks and downtime, interval-specific rates,
+abandonment, priority lanes, and uncertainty in future demand. A discrete-event
+simulation would be preferable when these features materially affect service.
+
+# Reproducibility and disclosure
+
+Run `Rscript scripts/run_all.R` from the repository root to regenerate the data,
+tests, results, figures, and this report. The random seeds, generator parameters,
+and temporal split are fixed in source control.
+
+This is an independent portfolio rewrite inspired by a collaborative university
+course exercise. No original course dataset, instructor material, real passenger
+record, or student identifier is included. The archived group statement records
+Reway Du and one teammate as sharing Task 3 and credits Reway with overall
+formatting, a float fix, and an observation correction; this report does not
+claim sole authorship of the earlier work. Obtain any teammate or instructor
+permission needed to mention the exercise publicly.
+
+AI assistance was used to help redesign, document, and test this portfolio
+version. The named author remains responsible for reviewing the source,
+reproducing the results, and being able to explain every assumption and formula.
+
+## Computing environment
+
+```{r session-info}
+sessionInfo()
+```

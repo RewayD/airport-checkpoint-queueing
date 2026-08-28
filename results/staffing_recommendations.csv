@@ -1,0 +1,5 @@
+period,lambda_hat,mu_hat,current_servers,minimum_servers_baseline,minimum_servers_stress,baseline_gap,stress_gap
+Morning peak,84.25892857142857,15.041281040473482,6,7,8,1,2
+Midday,52.598214285714285,15.178393141252329,5,5,5,0,0
+Afternoon peak,66.85714285714286,15.010632865717405,5,6,7,1,2
+Evening,34.339285714285715,14.844326271549875,4,3,4,-1,0

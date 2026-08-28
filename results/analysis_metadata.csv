@@ -1,0 +1,10 @@
+item,value
+training_start,2026-01-05
+training_end,2026-03-01
+holdout_start,2026-03-02
+holdout_end,2026-03-29
+training_days,56
+holdout_days,28
+target_minutes,10
+service_level_goal,0.85
+bootstrap_repetitions,500
