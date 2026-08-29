@@ -83,11 +83,6 @@ The M/M/c model assumes Poisson arrivals, independent exponential service durati
 
 This repository is an **independent portfolio rewrite inspired by a collaborative course exercise**. The original submission, instructor prompt, BASA files, and teammates' work are not redistributed here.
 
-The archived group statement records Reway Du and one teammate as sharing Task
-3; it also credits Reway with overall formatting, a float fix, and an
-observation correction. This repository does not claim that he solely authored
-the original queueing work. The present version is a clean-room, post-course
-rewrite and should be described that way.
 
 AI assistance was used to help redesign, document, and test this portfolio version. Reway Du is responsible for reviewing the code, reproducing the results, and being able to explain the model and its limitations before presenting it as portfolio work.
 
