@@ -15,6 +15,27 @@ output:
 ---
 
 ```{r setup, include=FALSE}
+# Locate the repository root whether this chunk is run from the project root
+# or interactively from the analysis/ directory in RStudio.
+find_project_root <- function(start = getwd()) {
+  current <- normalizePath(start, mustWork = TRUE)
+
+  repeat {
+    if (file.exists(file.path(current, "airport-checkpoint-queueing.Rproj"))) {
+      return(current)
+    }
+
+    parent <- dirname(current)
+    if (identical(parent, current)) {
+      stop("Could not locate airport-checkpoint-queueing.Rproj.", call. = FALSE)
+    }
+    current <- parent
+  }
+}
+
+project_root <- find_project_root()
+knitr::opts_knit$set(root.dir = project_root)
+
 knitr::opts_chunk$set(
   echo = TRUE,
   warning = FALSE,
@@ -30,18 +51,18 @@ suppressPackageStartupMessages({
   library(tidyr)
 })
 
-source(file.path("R", "queueing_functions.R"))
+source(file.path(project_root, "R", "queueing_functions.R"))
 
 period_order <- c("Morning peak", "Midday", "Afternoon peak", "Evening")
-estimates <- read_csv("results/period_estimates.csv", show_col_types = FALSE) %>%
+estimates <- read_csv(file.path(project_root, "results", "period_estimates.csv"), show_col_types = FALSE) %>%
   mutate(period = factor(period, levels = period_order))
-validation <- read_csv("results/holdout_validation.csv", show_col_types = FALSE) %>%
+validation <- read_csv(file.path(project_root, "results", "holdout_validation.csv"), show_col_types = FALSE) %>%
   mutate(period = factor(period, levels = period_order))
-staffing <- read_csv("results/staffing_recommendations.csv", show_col_types = FALSE) %>%
+staffing <- read_csv(file.path(project_root, "results", "staffing_recommendations.csv"), show_col_types = FALSE) %>%
   mutate(period = factor(period, levels = period_order))
-metadata <- read_csv("results/analysis_metadata.csv", show_col_types = FALSE)
+metadata <- read_csv(file.path(project_root, "results", "analysis_metadata.csv"), show_col_types = FALSE)
 metadata_values <- setNames(metadata$value, metadata$item)
-events <- read_csv("data/synthetic_checkpoint_events.csv", show_col_types = FALSE)
+events <- read_csv(file.path(project_root, "data", "synthetic_checkpoint_events.csv"), show_col_types = FALSE)
 
 fmt_number <- function(x, digits = 1) format(round(x, digits), nsmall = digits, big.mark = ",")
 fmt_percent <- function(x, digits = 1) paste0(fmt_number(100 * x, digits), "%")
@@ -188,7 +209,10 @@ cover structural errors such as non-Poisson arrivals or time-varying service
 rates.
 
 ```{r sensitivity-figure, echo=FALSE}
-knitr::include_graphics("figures/sensitivity_heatmap.png")
+knitr::include_graphics(
+  file.path(project_root, "figures", "sensitivity_heatmap.png"),
+  rel_path = FALSE
+)
 ```
 
 The sensitivity grid changes demand from 90% to 120% of the training estimate
@@ -203,7 +227,10 @@ service level is the proportion of holdout passengers whose elapsed time from
 arrival to service start is no more than 10 minutes.
 
 ```{r validation-figure, echo=FALSE}
-knitr::include_graphics("figures/holdout_validation.png")
+knitr::include_graphics(
+  file.path(project_root, "figures", "holdout_validation.png"),
+  rel_path = FALSE
+)
 ```
 
 ```{r validation-table}
@@ -231,7 +258,10 @@ parameter-bootstrap band, but that comparison is descriptive rather than a
 coverage guarantee.
 
 ```{r holdout-ecdf, echo=FALSE}
-knitr::include_graphics("figures/holdout_wait_ecdf.png")
+knitr::include_graphics(
+  file.path(project_root, "figures", "holdout_wait_ecdf.png"),
+  rel_path = FALSE
+)
 ```
 
 # Staffing scenarios
@@ -242,7 +272,10 @@ demand with service that is 5% slower. These are scenario calculations, not
 causal estimates of what one extra staff member would accomplish in practice.
 
 ```{r staffing-figure, echo=FALSE}
-knitr::include_graphics("figures/staffing_scenarios.png")
+knitr::include_graphics(
+  file.path(project_root, "figures", "staffing_scenarios.png"),
+  rel_path = FALSE
+)
 ```
 
 ```{r staffing-table}
