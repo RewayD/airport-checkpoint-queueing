@@ -38,7 +38,7 @@ The analysis also includes:
 
 ## Reproduce the project
 
-Use R 4.5 or a compatible recent version. From the repository root, run:
+Use R 4.5 or a compatible recent version. From the repository root(Terminal), to generate synthetic data, run:
 
 ```bash
 Rscript scripts/run_all.R
@@ -81,10 +81,7 @@ The M/M/c model assumes Poisson arrivals, independent exponential service durati
 
 ## Provenance and contribution statement
 
-This repository is an **independent portfolio rewrite inspired by a collaborative course exercise**. The original submission, instructor prompt, BASA files, and teammates' work are not redistributed here.
-
-
-AI assistance was used to help redesign, document, and test this portfolio version. Reway Du is responsible for reviewing the code, reproducing the results, and being able to explain the model and its limitations before presenting it as portfolio work.
+This repository is an independent portfolio rewrite inspired by a collaborative course exercise. AI assistance helped redesign, document, and test the portfolio version. I reran the pipeline, verified the committed outputs, and reviewed the model assumptions and limitations.
 
 ## Data and licence
 
