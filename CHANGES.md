@@ -42,8 +42,4 @@ This repository is a clean-room portfolio rewrite. The original R Markdown files
 - Added a self-contained HTML report, four figures, CSV outputs, session information, and a project README.
 - Documented model assumptions, external-validity limits, synthetic scope, AI assistance, and the need for a personal contribution statement.
 
-## Still required before public release
 
-- Reway Du should run the full pipeline personally and be prepared to explain the formulas, code, validation gaps, and assumptions.
-- If the earlier course exercise is named publicly, confirm any instructor and teammate permissions that apply.
-- Keep the archived contribution wording accurate: Task 3 was shared, not solely authored by Reway.
